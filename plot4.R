@@ -1,6 +1,6 @@
 buildPlot4 <- function (wd,width,height) {
   
-  # set working directorw with source file and saved plots
+  # set working directory with source file and saved plots
   setwd(wd)
   
   ## Read source data

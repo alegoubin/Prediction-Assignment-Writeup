@@ -1,9 +1,8 @@
-#functions for each plot, width and height are used to specifiy the canvas size for the saved file
-#the data frame must be passed as an argument as well
+
 
 buildPlot1 <- function (wd,width,height) {
   
-  # set working directorw with source file and saved plots
+  # set working directory with source file and saved plots
   setwd(wd)
   
   ## Read source data
