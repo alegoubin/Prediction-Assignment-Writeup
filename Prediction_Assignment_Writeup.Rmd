@@ -1,0 +1,209 @@
+---
+title: "Machine Learning - Prediction Assignment Writeup"
+author: "Arnaud Legoubin"
+date: "June 4,2017"
+output:
+  html_document:
+    keep_md: yes
+    smart: no
+  pdf_document: default
+---
+# Executive Summary
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here  [http://groupware.les.inf.puc-rio.br/har]http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+# Analysis
+
+### Load libraries
+
+```{r, results='hide',message=FALSE,warning=FALSE}
+library(caret)
+library(corrplot)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+```
+
+### 1) Download the datasets
+
+```{r, results='hide',message=FALSE,warning=FALSE}
+
+setwd("~/R/local_workdir/M8/W4")
+
+if (!file.exists("./pml-training.csv")) {
+  url.training <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+  download.file(url.training, destfile = "./data/pml-training.csv")
+}
+
+if (!file.exists("./pml-testing.csv")) {
+  url.testing <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+  download.file(url.testing, destfile = "./data/pml-testing.csv")
+}
+
+training <- read.csv("./pml-training.csv")
+testing <- read.csv("./pml-testing.csv")
+
+```
+
+
+### 2) Load the data
+
+```{r}
+training <- read.csv("./pml-training.csv")
+testing <- read.csv("./pml-testing.csv")
+
+
+dim(training)
+dim(testing)
+
+```
+
+
+### 3) Prepare/Clean the data
+
+As we have about 119 variables in the source dataset, we need to check whether we can remove some of theme that are unnecessary to the analysis.
+
+We need to remove NA variables and 0 or close to 0 variance records that will only pollute the end results.
+
+```{r}
+training <- training[, colSums(is.na(training)) == 0] 
+NearZeroVarIndex<-nearZeroVar(training)
+training <- training[,-NearZeroVarIndex]
+
+
+```
+
+We can also remove non needed columns such as the timeastamps and label values
+
+```{r}
+training <- training[, -(1:5)]
+testing <- testing[, -(1:5)]
+
+dim(training)
+
+```
+
+This has allowed to significantly the number of predictors to analyze
+
+### 4) Data Partitionning
+
+Using the caret package, we can now split the training data set into two subsets. We will keep the provided testing set with 20 records only to apply the model we will have chosen. We will keep 30% of the training set to verify the accuracy of the selected method. We are going to test the random forest, the decision tree and the GBM methods.
+
+```{r}
+set.seed(657896) 
+inTrain <- createDataPartition(training$classe, p=0.70, list=F)
+train_data <- training[inTrain, ]
+test_data <- training[-inTrain, ]
+```
+
+### 5) Correlation Matrix
+
+Let's use a correlation plot to indentify whether to variables are strongly correlated to each other. This may help to further reduce the number of variables.
+
+```{r}
+cor_train_data<-train_data[, -c(1,88)]
+cor_train_data<-sapply(cor_train_data,as.numeric)
+corMatrix <- cor(cor_train_data)
+
+
+```
+
+See Appendix 1.
+
+We can see there are some correlated variables but they don't seem to represent a high number of the current predictors. As such it may not be necessary to remove them at this point.
+
+### 6) RF Model
+
+Let's fit a random forest method.
+
+```{r}
+set.seed(8877)
+ctrl_rf <- trainControl(method="cv", number=3, verboseIter=FALSE)
+mod_fit_rf <- train(classe ~ ., data=train_data, method="rf",
+                          trControl=ctrl_rf)
+mod_fit_rf$finalModel
+
+```
+
+Now we do have the model. We can use the 30% testing subset to run a confusion matrix and test the accuracy.
+
+```{r}
+pred_rf <- predict(mod_fit_rf, newdata=test_data)
+conf_mat_rf <- confusionMatrix(pred_rf, test_data$classe)
+conf_mat_rf
+overall.accuracy <- conf_mat_rf$overall['Accuracy']
+```
+
+We get an accuracy of **`r overall.accuracy`**  with this model.
+
+
+### 7) GBM Model
+
+Likewise, we will fit a GBM model.
+
+```{r}
+set.seed(8877)
+ctrl_gbm <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+mod_fit_gbm <- train(classe ~ ., data=train_data, method = "gbm",
+                    trControl = ctrl_gbm, verbose = FALSE)
+
+mod_fit_gbm$finalModel
+```
+
+```{r}
+pred_gbm <- predict(mod_fit_gbm, newdata=test_data)
+conf_mat_gbm <- confusionMatrix(pred_gbm, test_data$classe)
+conf_mat_gbm
+overall.accuracy <- conf_mat_gbm$overall['Accuracy']
+```
+
+We get an accuracy of **`r overall.accuracy`**  with this model.
+
+### 8) Decision Tree Model
+
+```{r}
+set.seed(8877)
+mod_fit_dt <-  rpart(classe ~ ., data=train_data, method="class")
+
+mod_fit_dt
+```
+
+We can display a decision tree plot to illustrate the paths chosen by the algorithm (Appendix 2) .
+
+As before, let's use the testing subset we built to test the accuracy
+
+```{r}
+pred_dt <- predict(mod_fit_dt, newdata=test_data, type="class")
+conf_mat_dt <- confusionMatrix(pred_dt, test_data$classe)
+conf_mat_dt
+overall.accuracy <- conf_mat_dt$overall['Accuracy']
+```
+
+We get an accuracy of **`r overall.accuracy`**  with this model.
+
+### 9) Select the best model and apply it to the provided testing dataset
+
+Based on the accuracy results, the **random forest model** seems to be the best model to use out of the 3. Let's use it to predict the classe outcome for each of the 20 records of the requested test dataset. First we'll make sure we select only predictors that we had kept for the training dataset.
+
+```{r}
+
+testing<-testing[, which(names(testing) %in% names(training))]
+
+pred_final_test<- predict(mod_fit_rf, newdata=testing)
+pred_final_test
+```
+
+# Appendix
+
+### 1) Correlation matrix
+
+```{r}
+corrplot(corMatrix, order = "FPC", method = "color", type = "lower", 
+         tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+```
+
+### 2) Decision tree plot
+
+```{r}
+fancyRpartPlot(mod_fit_dt)
+```
